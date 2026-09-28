@@ -1,11 +1,8 @@
-YAML
-
 name: Daily-Pipeline
-
-'on':
+on:
+  workflow_dispatch:
   schedule:
     - cron: '0 20 * * 1-5'
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -20,31 +17,31 @@ jobs:
   run-pipeline:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Python
+      - name: Python Setup
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install Dependencies
+      - name: Install
         run: |
           pip install openpyxl requests
 
-      - name: Run HSI Daily Ingest
+      - name: HSI Ingest
         run: |
           python3 hsioptions/daily_update.py || true
 
-      - name: Run Stock Daily Ingest
+      - name: Stock Ingest
         run: |
           if [ -f "stockoptions/stock_daily_update.py" ]; then
             python3 stockoptions/stock_daily_update.py || true
           fi
 
-      - name: Build Combined Dashboard
+      - name: Build Dashboard
         run: |
           if [ -f "stockoptions/build_combined.py" ]; then
             python3 stockoptions/build_combined.py || true
@@ -65,7 +62,7 @@ jobs:
             echo "<h1>HSI Options Radar</h1>" > dist/index.html
           fi
 
-      - name: Commit DB Changes
+      - name: Commit DB
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -76,11 +73,11 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload Pages Artifact
+      - name: Upload Artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
-      - name: Deploy to GitHub Pages
+      - name: Deploy Pages
         id: deployment
         uses: actions/deploy-pages@v4
