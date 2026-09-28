@@ -1,95 +1,84 @@
-daily-flow.yml
-100%
-name: Daily Options Pipeline & Publish
+name: Daily-Pipeline
 
-# 觸發條件：
-# 1. 每日定時：每週二至週六 04:00 HKT (即 UTC 時間 20:00 週一至週五，對應美東/香港交易日結算)
-# 2. 手動觸發：隨時可在 GitHub 網頁後台點擊「Run workflow」一鍵補數或重刷
-on:
+'on':
   schedule:
     - cron: '0 20 * * 1-5'
   workflow_dispatch:
 
-# 賦予寫入 Git 倉庫與發布 GitHub Pages 的權限
 permissions:
   contents: write
   pages: write
   id-token: write
 
 concurrency:
-  group: "pages"
+  group: pages
   cancel-in-progress: false
 
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
-
     steps:
-      - name: 1. 檢出代碼倉庫 (Checkout Repository)
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 2. 設定 Python 環境 (Python 3.11)
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
-      - name: 3. 安裝必要依賴庫
+      - name: Install Dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install openpyxl requests
 
-      - name: 4. 執行每日恆指期權入庫 (HSI Daily Ingest)
+      - name: Run HSI Daily Ingest
         run: |
-          python3 hsioptions/daily_update.py || echo "[WARN] HSI update encountered warnings"
+          python3 hsioptions/daily_update.py || true
 
-      - name: 5. 執行每日股票期權入庫 (Stock Options Daily Ingest)
+      - name: Run Stock Daily Ingest
         run: |
           if [ -f "stockoptions/stock_daily_update.py" ]; then
-            python3 stockoptions/stock_daily_update.py || echo "[WARN] Stock options update encountered warnings"
+            python3 stockoptions/stock_daily_update.py || true
           fi
 
-      - name: 6. 重建全功能合併儀表板 (Build Merged Dashboard)
+      - name: Build Combined Dashboard
         run: |
           if [ -f "stockoptions/build_combined.py" ]; then
-            python3 stockoptions/build_combined.py || echo "[WARN] build_combined warning"
+            python3 stockoptions/build_combined.py || true
           fi
 
-      - name: 7. 準備發布靜態目錄 (Prepare Dist)
+      - name: Prepare Dist
         run: |
           mkdir -p dist
-          # 尋找合併版主頁面，複製為 index.html
-          if [ -f "your_files/hsioptions/期權倉數儀表板.html" ]; then
-            cp "your_files/hsioptions/期權倉數儀表板.html" dist/index.html
-          elif [ -f "your_files/hsioptions/options-dashboard.html" ]; then
-            cp "your_files/hsioptions/options-dashboard.html" dist/index.html
-          elif [ -f "your_files/hsioptions/恆指期權倉數儀表板.html" ]; then
-            cp "your_files/hsioptions/恆指期權倉數儀表板.html" dist/index.html
+          find your_files/ -name "*.html" -exec cp {} dist/ \; 2>/dev/null || true
+          find hsioptions/ -name "*.html" -exec cp {} dist/ \; 2>/dev/null || true
+          if [ -f "dist/期權倉數儀表板.html" ]; then
+            cp "dist/期權倉數儀表板.html" dist/index.html
+          elif [ -f "dist/options-dashboard.html" ]; then
+            cp "dist/options-dashboard.html" dist/index.html
+          elif [ -f "dist/恆指期權倉數儀表板.html" ]; then
+            cp "dist/恆指期權倉數儀表板.html" dist/index.html
+          else
+            echo "<h1>HSI Options Radar</h1>" > dist/index.html
           fi
 
-          # 複製子頁面（若存在）
-          cp your_files/hsioptions/*.html dist/ 2>/dev/null || true
-          echo "=== 發布檔案清單 (dist/) ==="
-          ls -lh dist/
-
-      - name: 8. 持久化存檔：將新增的 DB 數據自動 Commit 存回 GitHub
+      - name: Commit DB Changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add hsioptions/hsi_options.db stockoptions/stock_options.db your_files/ 2>/dev/null || true
-          git commit -m "Auto update options DB: $(date +'%Y-%m-%d')" || exit 0
-          git push origin main || echo "No changes or push skipped"
+          git add hsioptions/*.db stockoptions/*.db 2>/dev/null || true
+          git commit -m "Auto update DB" || true
+          git push origin main || true
 
-      - name: 9. 設定 GitHub Pages
+      - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      - name: 10. 上傳發布檔案
+      - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'dist'
+          path: dist
 
-      - name: 11. 自動部署至 GitHub Pages
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
