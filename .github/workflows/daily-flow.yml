@@ -17,67 +17,70 @@ jobs:
   run-pipeline:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Python Setup
+      - name: Setup Workspace Structure
+        run: |
+          mkdir -p ~/workspace/your_files/hsioptions
+          mkdir -p ~/workspace/hsioptions/logs ~/workspace/hsioptions/data
+          mkdir -p ~/workspace/stockoptions/logs ~/workspace/stockoptions/data
+          cp -r $GITHUB_WORKSPACE/hsioptions/* ~/workspace/hsioptions/ 2>/dev/null || true
+          cp -r $GITHUB_WORKSPACE/stockoptions/* ~/workspace/stockoptions/ 2>/dev/null || true
+
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install
+      - name: Install Dependencies
         run: |
           pip install openpyxl requests
 
-      - name: HSI Ingest
+      - name: Run Ingest and Dashboard Build
         run: |
-          python3 hsioptions/daily_update.py || true
-
-      - name: Stock Ingest
-        run: |
-          if [ -f "stockoptions/stock_daily_update.py" ]; then
-            python3 stockoptions/stock_daily_update.py || true
+          cd ~/workspace/hsioptions
+          python3 daily_update.py || true
+          if [ -f "$HOME/workspace/stockoptions/build_combined.py" ]; then
+            cd ~/workspace/stockoptions
+            python3 build_combined.py || true
           fi
 
-      - name: Build Dashboard
+      - name: Sync Back DB and Prepare Dist
         run: |
-          if [ -f "stockoptions/build_combined.py" ]; then
-            python3 stockoptions/build_combined.py || true
+          mkdir -p $GITHUB_WORKSPACE/dist
+          cp -r ~/workspace/your_files/hsioptions/* $GITHUB_WORKSPACE/dist/ 2>/dev/null || true
+          find $GITHUB_WORKSPACE -maxdepth 2 -name "*.html" -exec cp {} $GITHUB_WORKSPACE/dist/ \; 2>/dev/null || true
+          if [ -f "$GITHUB_WORKSPACE/dist/期權倉數儀表板.html" ]; then
+            cp "$GITHUB_WORKSPACE/dist/期權倉數儀表板.html" $GITHUB_WORKSPACE/dist/index.html
+          elif [ -f "$GITHUB_WORKSPACE/dist/options-dashboard.html" ]; then
+            cp "$GITHUB_WORKSPACE/dist/options-dashboard.html" $GITHUB_WORKSPACE/dist/index.html
+          elif [ -f "$GITHUB_WORKSPACE/dist/恆指期權倉數儀表板.html" ]; then
+            cp "$GITHUB_WORKSPACE/dist/恆指期權倉數儀表板.html" $GITHUB_WORKSPACE/dist/index.html
+          elif [ -f "$GITHUB_WORKSPACE/index.html" ]; then
+            cp "$GITHUB_WORKSPACE/index.html" $GITHUB_WORKSPACE/dist/index.html
           fi
+          cp ~/workspace/hsioptions/*.db $GITHUB_WORKSPACE/hsioptions/ 2>/dev/null || true
+          cp ~/workspace/stockoptions/*.db $GITHUB_WORKSPACE/stockoptions/ 2>/dev/null || true
 
-      - name: Prepare Dist
-        run: |
-          mkdir -p dist
-          find your_files/ -name "*.html" -exec cp {} dist/ \; 2>/dev/null || true
-          find hsioptions/ -name "*.html" -exec cp {} dist/ \; 2>/dev/null || true
-          if [ -f "dist/期權倉數儀表板.html" ]; then
-            cp "dist/期權倉數儀表板.html" dist/index.html
-          elif [ -f "dist/options-dashboard.html" ]; then
-            cp "dist/options-dashboard.html" dist/index.html
-          elif [ -f "dist/恆指期權倉數儀表板.html" ]; then
-            cp "dist/恆指期權倉數儀表板.html" dist/index.html
-          else
-            echo "<h1>HSI Options Radar</h1>" > dist/index.html
-          fi
-
-      - name: Commit DB
+      - name: Commit DB Changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add hsioptions/*.db stockoptions/*.db 2>/dev/null || true
-          git commit -m "Auto update DB" || true
+          git commit -m "Auto update DB [skip ci]" || true
           git push origin main || true
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload Artifact
+      - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
-      - name: Deploy Pages
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
