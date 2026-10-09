@@ -1,86 +1,97 @@
-name: Daily-Pipeline
+name: Daily Options Pipeline & Publish
+
+# 觸發條件：
+# 1. 每日定時：每週二至週六 04:00 HKT (即 UTC 時間 20:00 週一至週五，對應美東/香港交易日結算)
+# 2. 手動觸發：隨時可在 GitHub 網頁後台點擊「Run workflow」一鍵補數或重刷
 on:
-  workflow_dispatch:
   schedule:
     - cron: '0 20 * * 1-5'
+  workflow_dispatch:
 
+# 賦予寫入 Git 倉庫與發布 GitHub Pages 的權限
 permissions:
   contents: write
   pages: write
   id-token: write
 
 concurrency:
-  group: pages
+  group: "pages"
   cancel-in-progress: false
 
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Repository
+      - name: 1. 檢出代碼倉庫 (Checkout Repository)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Workspace Structure
-        run: |
-          mkdir -p ~/workspace/your_files/hsioptions
-          mkdir -p ~/workspace/hsioptions/logs ~/workspace/hsioptions/data
-          mkdir -p ~/workspace/stockoptions/logs ~/workspace/stockoptions/data
-          cp -r $GITHUB_WORKSPACE/hsioptions/* ~/workspace/hsioptions/ 2>/dev/null || true
-          cp -r $GITHUB_WORKSPACE/stockoptions/* ~/workspace/stockoptions/ 2>/dev/null || true
-
-      - name: Setup Python
+      - name: 2. 設定 Python 環境 (Python 3.11)
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
-      - name: Install Dependencies
+      - name: 3. 安裝必要依賴庫
         run: |
+          python -m pip install --upgrade pip
           pip install openpyxl requests
 
-      - name: Run Ingest and Dashboard Build
+      - name: 4. 執行每日恆指期權入庫 (HSI Daily Ingest)
         run: |
-          cd ~/workspace/hsioptions
-          python3 daily_update.py || true
-          if [ -f "$HOME/workspace/stockoptions/build_combined.py" ]; then
-            cd ~/workspace/stockoptions
-            python3 build_combined.py || true
+          python3 hsioptions/daily_update.py || echo "[WARN] HSI update encountered warnings"
+
+      - name: 5. 執行每日股票期權入庫 (Stock Options Daily Ingest)
+        run: |
+          if [ -f "stockoptions/stock_daily_update.py" ]; then
+            python3 stockoptions/stock_daily_update.py || echo "[WARN] Stock options update encountered warnings"
           fi
 
-      - name: Sync Back DB and Prepare Dist
+      - name: 6. 重建全功能合併儀表板 (Build Merged Dashboard)
         run: |
-          mkdir -p $GITHUB_WORKSPACE/dist
-          cp -r ~/workspace/your_files/hsioptions/* $GITHUB_WORKSPACE/dist/ 2>/dev/null || true
-          find $GITHUB_WORKSPACE -maxdepth 2 -name "*.html" -exec cp {} $GITHUB_WORKSPACE/dist/ \; 2>/dev/null || true
-          if [ -f "$GITHUB_WORKSPACE/dist/期權倉數儀表板.html" ]; then
-            cp "$GITHUB_WORKSPACE/dist/期權倉數儀表板.html" $GITHUB_WORKSPACE/dist/index.html
-          elif [ -f "$GITHUB_WORKSPACE/dist/options-dashboard.html" ]; then
-            cp "$GITHUB_WORKSPACE/dist/options-dashboard.html" $GITHUB_WORKSPACE/dist/index.html
-          elif [ -f "$GITHUB_WORKSPACE/dist/恆指期權倉數儀表板.html" ]; then
-            cp "$GITHUB_WORKSPACE/dist/恆指期權倉數儀表板.html" $GITHUB_WORKSPACE/dist/index.html
-          elif [ -f "$GITHUB_WORKSPACE/index.html" ]; then
-            cp "$GITHUB_WORKSPACE/index.html" $GITHUB_WORKSPACE/dist/index.html
+          if [ -f "stockoptions/build_combined.py" ]; then
+            python3 stockoptions/build_combined.py || echo "[WARN] build_combined warning"
           fi
-          cp ~/workspace/hsioptions/*.db $GITHUB_WORKSPACE/hsioptions/ 2>/dev/null || true
-          cp ~/workspace/stockoptions/*.db $GITHUB_WORKSPACE/stockoptions/ 2>/dev/null || true
 
-      - name: Commit DB Changes
+      - name: 7. 準備發布靜態目錄 (Prepare Dist)
+        run: |
+          mkdir -p dist
+          # 1. 優先採用倉庫根目錄手動上傳的合併版 index.html
+          if [ -f "index.html" ]; then
+            cp "index.html" dist/index.html
+          elif [ -f "your_files/hsioptions/期權倉數儀表板.html" ]; then
+            cp "your_files/hsioptions/期權倉數儀表板.html" dist/index.html
+          elif [ -f "your_files/hsioptions/options-dashboard.html" ]; then
+            cp "your_files/hsioptions/options-dashboard.html" dist/index.html
+          elif [ -f "your_files/hsioptions/恆指期權倉數儀表板.html" ]; then
+            cp "your_files/hsioptions/恆指期權倉數儀表板.html" dist/index.html
+          fi
+
+          # 2. 同步發布所有子頁面與英文別名，避免單獨訪問時 404
+          cp your_files/hsioptions/*.html dist/ 2>/dev/null || true
+          [ -f "your_files/hsioptions/股票期權倉數儀表板.html" ] && cp "your_files/hsioptions/股票期權倉數儀表板.html" dist/stock.html 2>/dev/null || true
+          
+          echo "=== 發布檔案清單 (dist/) ==="
+          ls -lh dist/
+
+      - name: 8. 持久化存檔：將新增的 DB 數據自動 Commit 存回 GitHub
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add hsioptions/*.db stockoptions/*.db 2>/dev/null || true
-          git commit -m "Auto update DB [skip ci]" || true
-          git push origin main || true
+          git add hsioptions/hsi_options.db stockoptions/stock_options.db your_files/ 2>/dev/null || true
+          git commit -m "Auto update options DB: $(date +'%Y-%m-%d')" || exit 0
+          git push origin main || echo "No changes or push skipped"
 
-      - name: Setup Pages
+      - name: 9. 設定 GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload Pages Artifact
+      - name: 10. 上傳發布檔案
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: 'dist'
 
-      - name: Deploy to GitHub Pages
+      - name: 11. 自動部署至 GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
