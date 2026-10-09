@@ -50,25 +50,30 @@ jobs:
 
       - name: 6. 重建全功能合併儀表板 (Build Merged Dashboard)
         run: |
+          # 兼容不同目錄結構下的 build_combined.py
           if [ -f "stockoptions/build_combined.py" ]; then
-            python3 stockoptions/build_combined.py || echo "[WARN] build_combined warning"
+            python3 stockoptions/build_combined.py || true
+          elif [ -f "hsioptions/build_combined.py" ]; then
+            python3 hsioptions/build_combined.py || true
+          elif [ -f "build_combined.py" ]; then
+            python3 build_combined.py || true
           fi
 
       - name: 7. 準備發布靜態目錄 (Prepare Dist)
         run: |
           mkdir -p dist
-          # 1. 優先採用倉庫根目錄手動上傳的合併版 index.html
-          if [ -f "index.html" ]; then
-            cp "index.html" dist/index.html
-          elif [ -f "your_files/hsioptions/期權倉數儀表板.html" ]; then
+          # 優先使用爬蟲剛剛全量生成的最新合併版！
+          if [ -f "your_files/hsioptions/期權倉數儀表板.html" ]; then
             cp "your_files/hsioptions/期權倉數儀表板.html" dist/index.html
           elif [ -f "your_files/hsioptions/options-dashboard.html" ]; then
             cp "your_files/hsioptions/options-dashboard.html" dist/index.html
           elif [ -f "your_files/hsioptions/恆指期權倉數儀表板.html" ]; then
             cp "your_files/hsioptions/恆指期權倉數儀表板.html" dist/index.html
+          elif [ -f "index.html" ]; then
+            cp "index.html" dist/index.html
           fi
 
-          # 2. 同步發布所有子頁面與英文別名，避免單獨訪問時 404
+          # 同步複製所有子頁面與英文別名
           cp your_files/hsioptions/*.html dist/ 2>/dev/null || true
           [ -f "your_files/hsioptions/股票期權倉數儀表板.html" ] && cp "your_files/hsioptions/股票期權倉數儀表板.html" dist/stock.html 2>/dev/null || true
           
