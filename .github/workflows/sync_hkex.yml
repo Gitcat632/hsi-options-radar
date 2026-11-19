@@ -1,0 +1,28 @@
+name: Sync HKEX Options OI
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '5 12 * * 1-5'   # 20:05 HKT (after HKEX settlement)
+    - cron: '0 20 * * 1-5'   # 04:00 HKT (overnight safety sync)
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch HKEX Options OI
+        run: python3 scripts/sync_hkex.py
+      - name: Commit updated JSON
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/hsi_options_latest.json
+          git diff --staged --quiet || git commit -m "chore: sync HKEX options OI"
+          git push
